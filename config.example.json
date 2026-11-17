@@ -1,0 +1,14 @@
+{
+  "proxy": "http://127.0.0.1:7890",
+  "relay": "auto",
+  "locale": "",
+  "timezone": "",
+  "engine": "chrome",
+  "engine_path": "",
+  "profile": "claude",
+  "fingerprint_seed": 0,
+  "start_urls": ["https://claude.ai/new"],
+  "open_check_page": false,
+  "extra_args": [],
+  "window_size": "1280,900"
+}

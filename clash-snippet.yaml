@@ -1,0 +1,13 @@
+# Example rules only: merge above the final MATCH in your existing config.
+# Replace YOUR_PROXY_GROUP with an existing proxy group. No nodes are supplied.
+# Do not replace your complete configuration with this file.
+rules:
+  - DOMAIN-SUFFIX,anthropic.com,YOUR_PROXY_GROUP
+  - DOMAIN-SUFFIX,claude.ai,YOUR_PROXY_GROUP
+  - DOMAIN-SUFFIX,claude.com,YOUR_PROXY_GROUP
+  - DOMAIN-SUFFIX,claudeusercontent.com,YOUR_PROXY_GROUP
+  - DOMAIN-SUFFIX,ip-api.com,YOUR_PROXY_GROUP
+  - DOMAIN-SUFFIX,ipwho.is,YOUR_PROXY_GROUP
+  - DOMAIN-SUFFIX,ipapi.co,YOUR_PROXY_GROUP
+  - DOMAIN-SUFFIX,cleanip.io,YOUR_PROXY_GROUP
+  - DOMAIN-SUFFIX,checkcc.org,YOUR_PROXY_GROUP
