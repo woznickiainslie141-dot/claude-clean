@@ -9,10 +9,13 @@ $originalLocal = $env:LOCALAPPDATA
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw 'The disposable test runner needs administrator privileges for this integration test.'
 }
-$guard = Join-Path (Split-Path -Parent $PSScriptRoot) 'web-guard.ps1'
+$project = Split-Path -Parent $PSScriptRoot
 $base = Join-Path $env:RUNNER_TEMP ([guid]::NewGuid().ToString())
 $path = Join-Path $base 'Google\Chrome\Application'
 New-Item -Path $path -ItemType Directory -Force | Out-Null
+$guard = Join-Path $base 'web-guard.ps1'
+Copy-Item -LiteralPath (Join-Path $project 'web-guard.ps1'),(Join-Path $project 'web-egress.ps1') -Destination $base
+Set-Content -LiteralPath (Join-Path $base 'config.json') -Value '{"web_require_verified_ipv4":false}'
 $exe = Join-Path $path 'chrome.exe'
 # Probe a TCP endpoint only; never send HTTP, TLS, credentials or page contents.
 Add-Type -OutputAssembly $exe -OutputType ConsoleApplication -TypeDefinition @'

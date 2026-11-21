@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 [CmdletBinding()]
 param(
-    [ValidateSet('On','Off','Status','Open')][string]$Mode = 'Status',
+    [ValidateSet('On','Off','Status','Open','CheckEgress')][string]$Mode = 'Status',
     [string]$CallerSid,
     [ValidateRange(0,65535)][int]$LocalProxyPort = 0,
     [switch]$WaitForGuardedChrome
@@ -116,6 +116,11 @@ function Assert-RunningChromeProxy([string]$chrome, [int]$port) {
 }
 
 if ($MyInvocation.InvocationName -eq '.') { return }
+if ($Mode -in @('Open','CheckEgress')) {
+    . (Join-Path $PSScriptRoot 'web-egress.ps1')
+    Assert-WebEgressPolicy -ShowWarning
+    if ($Mode -eq 'CheckEgress') { return }
+}
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 if ($CallerSid -and $CallerSid -ne $identity.User.Value) { throw 'Run as the same Windows account.' }
 $isAdmin = ([Security.Principal.WindowsPrincipal]$identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)

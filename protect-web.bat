@@ -1,6 +1,8 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0web-guard.ps1" -Mode CheckEgress
+if errorlevel 1 goto failed
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0web-guard.ps1" -Mode On
 if errorlevel 1 goto failed
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0web-guard.ps1" -Mode Open

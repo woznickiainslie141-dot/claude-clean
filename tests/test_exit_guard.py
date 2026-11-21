@@ -75,6 +75,50 @@ class RouteTests(unittest.TestCase):
 
 
 class GateTests(unittest.IsolatedAsyncioTestCase):
+    async def test_unverified_egress_stops_before_probe_relay_or_chrome(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(guard, "ROOT", Path(folder)), \
+             patch.object(guard, "route_at") as route, patch.object(guard, "exit_at") as probe, \
+             patch.object(asyncio, "start_server") as listener, \
+             patch.object(asyncio, "create_subprocess_exec") as chrome:
+            config = Path(folder) / "config.json"
+            for raw in (None, "{}", "[]", "{", '{"web_require_verified_ipv4":"false"}',
+                        '{"web_require_verified_ipv4":true,"web_require_ipv6":false}'):
+                if raw is not None:
+                    config.write_text(raw, encoding="utf-8")
+                for check_only in (False, True):
+                    with self.subTest(raw=raw, check_only=check_only), self.assertRaises(guard.GuardError):
+                        await guard.run_session(7890, 1234, check_only=check_only)
+            for call in (route, probe, listener, chrome):
+                call.assert_not_called()
+            self.assertFalse((Path(folder) / "state").exists())
+
+    async def test_enabling_strict_policy_trips_an_open_monitored_session(self):
+        closed = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        with tempfile.TemporaryDirectory() as folder, patch.object(guard, "ROOT", Path(folder)):
+            config = Path(folder) / "config.json"
+            config.write_text('{"web_require_verified_ipv4":false}', encoding="utf-8")
+
+            async def wait_for_exit():
+                await closed.wait()
+                return 0
+
+            async def launch_stand_in(*args):
+                config.write_text('{"web_require_verified_ipv4":true}', encoding="utf-8")
+                return Mock(wait=wait_for_exit)
+
+            with patch.object(guard, "route_at", return_value=(("fixed",), "trojan")), \
+                 patch.object(guard, "observed_ips", AsyncMock(return_value=("192.0.2.1", "192.0.2.1"))), \
+                 patch.object(guard, "observed_ipv6", AsyncMock(return_value=None)), \
+                 patch.object(guard, "confirm_pin", return_value=False), \
+                 patch.object(asyncio, "create_subprocess_exec", side_effect=launch_stand_in), \
+                 patch.object(guard, "dialog", side_effect=lambda msg: loop.call_soon_threadsafe(closed.set)) as alert, \
+                 patch("builtins.print"):
+                # The stand-in exits as soon as the protection dialog appears.
+                await asyncio.wait_for(guard.run_session(7890, 1234), 4)
+                alert.assert_called_once()
+                self.assertIn("IPv4", alert.call_args.args[0])
+
     async def test_ipv6_timeout_unknown_but_bad_tls_fails(self):
         with patch.object(guard, "exit_at", side_effect=TimeoutError):
             self.assertIsNone(await guard.observed_ipv6(7890))
@@ -90,10 +134,12 @@ class GateTests(unittest.IsolatedAsyncioTestCase):
              patch.object(guard, "observed_ipv6", AsyncMock(return_value=None)), \
              patch.object(guard, "dialog", side_effect=AssertionError), \
              patch.object(asyncio, "create_subprocess_exec", side_effect=AssertionError), patch("builtins.print"):
+            config = Path(folder) / "config.json"
+            config.write_text('{"web_require_verified_ipv4":false}', encoding="utf-8")
             await guard.run_session(7890, 1234, check_only=True)
             with self.assertRaises(guard.GuardError):
                 await guard.run_session(7890, 1234, require_ipv6=True, check_only=True)
-            self.assertEqual(list(Path(folder).iterdir()), [])
+            self.assertEqual(list(Path(folder).iterdir()), [config])
 
     async def test_ipv6_appears_changes_or_vanishes(self):
         v6 = "2001:db8::1"

@@ -8,13 +8,17 @@ Windows 上的独立浏览器启动器、HTTP / SOCKS5 代理中继，以及可�
 
 ## 使用 SakuraCat 打开原生 Chrome
 
-把 `config.example.json` 复制为 `config.json`，填写 SakuraCat 的本机 HTTP 代理（例如 `http://127.0.0.1:7890`），双击 `sakuracat-web.bat`。客户端未运行时，窗口会询问是否启动 SakuraCat。工具会等候当前用户的客户端和后台服务端口就绪。首次启用防火墙保护需先退出 Chrome 并确认 UAC。可信出口已登记且检查通过时直接打开空白页。启动被拦截时会弹出原因。
+**单一 IPv4 出口。** 受保护的原生 Chrome 默认要求网站看到已核验的 IPv4。当前集成的本机代理只能证明检测站看到的地址，无法核验远端代理对每个网站的出口。因此启动入口会在联网探测、启动浏览器或请求管理员权限之前弹窗并停止。重测、换节点或只在电脑上关闭 IPv6 均不能解除这一拦截。
+
+如果你接受定期检测的局限，可在本机 `config.json` 中明确将 `web_require_verified_ipv4` 设为 `false`，使用下述监测模式。设为 `true` 或省略此项都会执行严格拦截。升级旧版本时，请先退出已打开的受保护 Chrome 和旧守护程序。
+
+监测模式首次设置时，把 `config.example.json` 复制为 `config.json`，选择上述模式，填写 SakuraCat 的本机 HTTP 代理（例如 `http://127.0.0.1:7890`），双击 `sakuracat-web.bat`。客户端未运行时，窗口会询问是否启动 SakuraCat。工具会等候当前用户的客户端和后台服务端口就绪。首次启用防火墙保护需先退出 Chrome 并确认 UAC。可信出口已登记且检查通过时直接打开空白页。启动被拦截时会弹出原因。
 
 **持续出口保护**需要 Python 3.10+。在 SakuraCat 全局模式下选好固定节点，完全退出原生 Chrome，再双击上述入口。程序会检查本机控制接口，沿着手动选择的代理组确认末端为远程节点，并经同一个本机代理分别向 ipify 的 IPv4、双栈和 IPv6 专用接口查询出口。首次请核对弹窗中的地址，点“是”后才在本机保存。Chrome 通过专用的本机端口联网，同时限制 WebRTC 使用未代理的 UDP。部分音视频通话可能受影响。保持守护窗口开启，继续使用原来的浏览器登录资料。
 
 守护程序每轮路由检查后等约 1 秒，出口检查后等约 5 秒。发现切到直连、离开全局模式、节点或任一检测地址变化、检测失败时，会切断现有转发连接、拒绝新的连接，并在电脑弹窗。恢复节点后请完全退出 Chrome，通过检查入口重新启动。确实想换可信出口时，先退出 Chrome，运行 `sakuracat-web.bat -Mode ResetExit` 再重新确认。日常只读检查可用 `sakuracat-web.bat -Mode Check`。找不到自定义安装的 SakuraCat 时可配置 `sakuracat_path`。
 
-IPv6 专用探针超时会显示“独立 IPv6 未核验”。默认允许仅登记了 IPv4 的会话继续，期间若首次测到 IPv6 就断开；此前已确认的 IPv6 消失、改变，或双栈与专用探针观察到不同 IPv6 时也会拦截。将本机 `config.json` 的 `web_require_ipv6` 设为 `true`，即可要求 IPv6 专用探针也通过才启动。使用 `sakuracat-web.bat -Mode CheckExit` 可经代理查看检测覆盖与登记是否一致，全程不打开浏览器、不登记地址。检测站的超时无法排除其他网站走 IPv6。
+IPv6 专用探针超时会显示“独立 IPv6 未核验”。在监测模式下，默认允许仅登记了 IPv4 的会话继续，期间若首次测到 IPv6 就断开；此前已确认的 IPv6 消失、改变，或双栈与专用探针观察到不同 IPv6 时也会拦截。将本机 `config.json` 的 `web_require_ipv6` 设为 `true`，即可要求 IPv6 专用探针也通过才启动。使用 `sakuracat-web.bat -Mode CheckExit` 可经代理查看检测覆盖与登记是否一致，全程不打开浏览器、不登记地址。检测站的超时无法排除其他网站走 IPv6。
 
 守护还会从 SakuraCat 的本机控制接口核对它报告的活动连接。通过本机端口识别本次 Chrome 转发的连接，若报告的实际路径与选定节点不同，会断开并提醒。代理服务器之后如何出网、两次采样之间已经关闭的短连接，均不在此项核验范围内。
 
@@ -36,7 +40,7 @@ IPv6 专用探针超时会显示“独立 IPv6 未核验”。默认允许仅登
 
 ## 功能
 
-**如果你已经在原生 Google Chrome 登录，只想在代理断开时阻止直接出网**，请先在 Windows 开启手动本机 HTTP 代理，保存工作并完全退出 Chrome，双击 `protect-web.bat`。同意 UAC 后，工具先核对 Windows 防火墙的有效规则，再用原生 Chrome 打开空白窗口。浏览器继续使用自己的资料和登录状态。此入口无需 Python，不发起网站预检。
+如果只需要本机防直连，请在 `config.json` 中明确设置 `web_require_verified_ipv4` 为 `false`。然后在 Windows 开启手动本机 HTTP 代理，保存工作并完全退出 Chrome，双击 `protect-web.bat`。同意 UAC 后，工具先核对 Windows 防火墙的有效规则，再用原生 Chrome 打开空白窗口。浏览器继续使用自己的资料和登录状态。此入口无需 Python，不发起网站预检。
 
 规则针对已安装的 `chrome.exe` 的所有窗口、所有协议及三个防火墙配置文件，阻止访问回环以外的 IPv4/IPv6 地址。代理掉线、系统代理被关闭或浏览器尝试直接联网时，网页可能显示网络错误。规则在浏览器关闭和系统重启后仍保留。查看状态用 `powershell -NoProfile -ExecutionPolicy Bypass -File .\web-guard.ps1 -Mode Status`。恢复正常出网前先退出 Chrome，再双击 `unprotect-web.bat`。适用于单一标准路径安装的 Google Chrome 和本机回环代理。
 

@@ -5,6 +5,7 @@ param([ValidateSet('Open','ClientOnly','Check','CheckExit','ResetExit')][string]
 
 $ErrorActionPreference = 'Stop'
 $guard = Join-Path $PSScriptRoot 'web-guard.ps1'
+. (Join-Path $PSScriptRoot 'web-egress.ps1')
 
 function Confirm-WebAction([string]$message) {
     Add-Type -AssemblyName System.Windows.Forms
@@ -111,6 +112,11 @@ function Invoke-CheckedLaunch {
         }
         return
     }
+    if ($Mode -ne 'Check') { Assert-WebEgressPolicy }
+    else {
+        $reason = Get-WebEgressBlockReason
+        if ($reason) { Write-Host $reason }
+    }
     $cfg = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $PSScriptRoot 'config.json') | ConvertFrom-Json
     if ([string]$cfg.proxy -notmatch '^http://127\.0\.0\.1:([0-9]{1,5})/?$') { throw '此入口需要在 config.json 设置本机 HTTP 代理，例如 http://127.0.0.1:7890。' }
     $port = [int]$Matches[1]
@@ -165,9 +171,9 @@ function Invoke-CheckedLaunch {
 if ($MyInvocation.InvocationName -ne '.') {
     try { Invoke-CheckedLaunch }
     catch {
-        if ($Mode -eq 'Open' -and $_.Exception -isnot [System.OperationCanceledException]) {
+        if ($Mode -in @('Open','ClientOnly') -and $_.Exception -isnot [System.OperationCanceledException]) {
             Add-Type -AssemblyName System.Windows.Forms
-            [void][Windows.Forms.MessageBox]::Show(($_.Exception.Message + "`n请检查后从桌面入口重试。"), 'Chrome 启动检查', 'OK', 'Warning')
+            [void][Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Chrome 启动检查', 'OK', 'Warning')
         }
         throw
     }

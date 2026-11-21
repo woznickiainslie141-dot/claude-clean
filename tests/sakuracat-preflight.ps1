@@ -6,7 +6,9 @@ $source = Join-Path (Split-Path -Parent $PSScriptRoot) 'sakuracat-web.ps1'
 $tempDir = New-Item -ItemType Directory -Path (Join-Path $env:TEMP ([guid]::NewGuid().ToString()))
 try {
     Copy-Item -LiteralPath $source -Destination $tempDir.FullName
-    Set-Content -LiteralPath (Join-Path $tempDir 'config.json') -Value '{"proxy":"http://127.0.0.1:7890"}'
+    Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $source) 'web-egress.ps1') -Destination $tempDir.FullName
+    $config = Join-Path $tempDir 'config.json'
+    Set-Content -LiteralPath $config -Value '{"proxy":"http://127.0.0.1:7890","web_require_verified_ipv4":false}'
     . (Join-Path $tempDir 'sakuracat-web.ps1')
 
     function Test-ListenerOwnership {
@@ -109,8 +111,35 @@ try {
     Test-LaunchCase 'Healthy launch without dialog' $true $true @() @($true) $false '' 'guard-Status,exit-guard7890'
     Test-LaunchCase 'Client check before elevation' $true $false @() @($true) $false '' '' 'ClientOnly'
     Test-LaunchCase 'Local proxy stays unavailable' $true $true @() @($false) $false '*7890*' ''
+    foreach ($inputJson in @('{"web_require_verified_ipv4":true}','{}','{"web_require_verified_ipv4":"false"}','[]','{')) {
+        Set-Content -LiteralPath $config -Value $inputJson
+        foreach ($entry in 'Open','ClientOnly','CheckExit') {
+            Test-LaunchCase "Unverified egress $entry" $true $true @() @() $false '*Chrome*' '' $entry
+        }
+    }
+    Remove-Item -LiteralPath $config
+    Test-LaunchCase 'Missing config stops launch' $true $true @() @() $false '*Chrome*' ''
+
+    # Exercise the actual low-level entry points, replacing the modal UI in this fixture.
+    Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $source) 'web-guard.ps1') -Destination $tempDir.FullName
+    Add-Content -Encoding UTF8 -LiteralPath (Join-Path $tempDir 'web-egress.ps1') -Value @'
+function Assert-WebEgressPolicy([switch]$ShowWarning) {
+    if ($ShowWarning -and (Get-WebEgressBlockReason)) { throw 'Fixture recorded egress warning.' }
+    throw 'Missing strict egress warning.'
+}
+'@
+    foreach ($arguments in @(
+        @{Mode='CheckEgress'}, @{Mode='Open'}, @{Mode='Open'; LocalProxyPort=7890; WaitForGuardedChrome=$true}
+    )) {
+        $failure = ''
+        # A deliberately mismatched SID also prevents any real firewall or browser action on regression.
+        try { & (Join-Path $tempDir 'web-guard.ps1') @arguments -CallerSid 'fixture' }
+        catch { $failure = $_.Exception.Message }
+        if ($failure -ne 'Fixture recorded egress warning.') { throw "Raw entry missed warning: $failure" }
+    }
+    Write-Host 'Basic and monitored browser entry points request warning before launch OK'
 } finally {
-    foreach ($name in 'config.json','sakuracat-web.ps1') {
+    foreach ($name in 'config.json','sakuracat-web.ps1','web-egress.ps1','web-guard.ps1') {
         $file = Join-Path $tempDir $name
         if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file }
     }

@@ -25,6 +25,20 @@ class GuardError(Exception):
     pass
 
 
+def check_egress_policy():
+    try:
+        cfg = json.loads((ROOT / "config.json").read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError) as exc:
+        raise GuardError("无法读取 Chrome 保护设置。已停止转发。") from exc
+    if not isinstance(cfg, dict):
+        raise GuardError("Chrome 保护设置格式无效。已停止转发。")
+    required = cfg.get("web_require_verified_ipv4", True)
+    if type(required) is not bool:
+        raise GuardError("web_require_verified_ipv4 必须为 true 或 false。已停止转发。")
+    if required:
+        raise GuardError("当前代理无法保证所有网站都看到已核验的那个 IPv4。已停止转发。")
+
+
 def read_reply(conn, path, limit):
     try:
         conn.request("GET", path, headers={"Connection": "close", "Cache-Control": "no-cache"})
@@ -233,6 +247,8 @@ async def watch(gate, key, sample, expected, interval, ttl):
 
 
 async def run_session(upstream, controller, require_ipv6=False, check_only=False):
+    check_egress_policy()
+
     async def route():
         return await asyncio.wait_for(asyncio.to_thread(route_at, controller), 2.5)
 
@@ -263,9 +279,11 @@ async def run_session(upstream, controller, require_ipv6=False, check_only=False
             raise GuardError("确认期间代理出口已变。")
     if await route() != selection:
         raise GuardError("确认期间代理路径已变。")
+    check_egress_policy()
     gate = Gate(upstream)
 
     async def active_route():
+        check_egress_policy()
         selected = await route()
         if selected == selection and gate.source_ports:
             ports = gate.source_ports.copy()
