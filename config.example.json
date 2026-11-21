@@ -1,5 +1,6 @@
 {
   "proxy": "http://127.0.0.1:7890",
+  "web_require_ipv6": false,
   "relay": "auto",
   "locale": "",
   "timezone": "",

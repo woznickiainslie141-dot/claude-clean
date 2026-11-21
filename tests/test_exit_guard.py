@@ -1,4 +1,6 @@
 import asyncio
+import json
+import ssl
 from pathlib import Path
 import tempfile
 import time
@@ -25,7 +27,7 @@ class RouteTests(unittest.TestCase):
     def test_pin_enrollment_and_stale_pin(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "pin.json"
-            sample = ("192.0.2.1", "2001:db8::1")
+            sample = ("192.0.2.1", "2001:db8::1", "2001:db8::1")
             with patch.object(guard, "dialog", return_value=False), self.assertRaises(guard.GuardError):
                 guard.confirm_pin(path, sample)
             self.assertFalse(path.exists())
@@ -34,10 +36,74 @@ class RouteTests(unittest.TestCase):
             with patch.object(guard, "dialog", side_effect=AssertionError):
                 guard.confirm_pin(path, sample)
                 with self.assertRaises(guard.GuardError):
-                    guard.confirm_pin(path, ("192.0.2.2", sample[1]))
+                    guard.confirm_pin(path, ("192.0.2.2", *sample[1:]))
+
+    def test_legacy_pins_never_trust_unobserved_ipv6(self):
+        ip4, ip6 = "192.0.2.1", "2001:db8::1"
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "pin.json"
+            path.write_text(json.dumps([ip4, ip4]), encoding="utf8")
+            guard.verify_saved_pin(path, (ip4, ip4, None))
+            with self.assertRaises(guard.GuardError):
+                guard.verify_saved_pin(path, (ip4, ip4, ip6))
+            path.write_text(json.dumps([ip4, ip6]), encoding="utf8")
+            guard.verify_saved_pin(path, (ip4, ip6, ip6))
+            with self.assertRaises(guard.GuardError):
+                guard.verify_saved_pin(path, (ip4, ip6, None))
+
+    def test_ipv6_coverage_and_conflicting_paths(self):
+        v4, v6 = "192.0.2.1", "2001:db8::1"
+        guard.check_families((v4, v4), None, False)
+        guard.check_families((v4, v6), v6, True)
+        for dual, independent, required in [(v4, None, True), (v6, None, False), (v6, "2001:db8::2", False),
+                                             ("192.0.2.2", None, False)]:
+            with self.assertRaises(guard.GuardError):
+                guard.check_families((v4, dual), independent, required)
+
+    def test_only_this_relays_reported_connections_are_checked(self):
+        selected = ("GLOBAL", "fixed")
+        meta = {"sourceIP": "127.0.0.1", "sourcePort": 50001, "inboundPort": 7890}
+        unrelated = {"metadata": dict(meta, sourcePort=50002), "chains": ["DIRECT"]}
+        def verify(chain):
+            data = {"connections": [unrelated, {"metadata": meta, "chains": chain}]}
+            with patch.object(guard, "read_reply", return_value=json.dumps(data)):
+                guard.verify_flows(1234, 7890, {"50001"}, selected)
+        verify(["fixed", "GLOBAL"])
+        for chain in ([], ["DIRECT", "GLOBAL"], ["other", "GLOBAL"]):
+            with self.assertRaises(guard.GuardError):
+                verify(chain)
 
 
 class GateTests(unittest.IsolatedAsyncioTestCase):
+    async def test_ipv6_timeout_unknown_but_bad_tls_fails(self):
+        with patch.object(guard, "exit_at", side_effect=TimeoutError):
+            self.assertIsNone(await guard.observed_ipv6(7890))
+        with patch.object(guard, "exit_at", side_effect=ssl.SSLCertVerificationError):
+            with self.assertRaises(guard.GuardError):
+                await guard.observed_ipv6(7890)
+
+    async def test_inspection_never_launches_or_enrolls(self):
+        pair = ("192.0.2.1", "192.0.2.1")
+        with tempfile.TemporaryDirectory() as folder, patch.object(guard, "ROOT", Path(folder)), \
+             patch.object(guard, "route_at", return_value=(("GLOBAL", "node"), "trojan")), \
+             patch.object(guard, "observed_ips", AsyncMock(return_value=pair)), \
+             patch.object(guard, "observed_ipv6", AsyncMock(return_value=None)), \
+             patch.object(guard, "dialog", side_effect=AssertionError), \
+             patch.object(asyncio, "create_subprocess_exec", side_effect=AssertionError), patch("builtins.print"):
+            await guard.run_session(7890, 1234, check_only=True)
+            with self.assertRaises(guard.GuardError):
+                await guard.run_session(7890, 1234, require_ipv6=True, check_only=True)
+            self.assertEqual(list(Path(folder).iterdir()), [])
+
+    async def test_ipv6_appears_changes_or_vanishes(self):
+        v6 = "2001:db8::1"
+        for initial, current in [(None, v6), (v6, None), (v6, "2001:db8::2")]:
+            gate = guard.Gate(1)
+            gate.deadlines.update(route=time.monotonic()+3, ip=time.monotonic()+10, ipv6=time.monotonic()+10)
+            await guard.watch(gate, "ipv6", AsyncMock(return_value=current), initial, 0, 16)
+            self.assertTrue(gate.stopped.is_set())
+            self.assertIn("IPv6", gate.reason)
+
     async def test_change_kills_existing_tunnel_and_rejects_new_clients(self):
         upstream_closed = asyncio.Event()
 

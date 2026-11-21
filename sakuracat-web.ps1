@@ -1,7 +1,7 @@
 ﻿#Requires -Version 5.1
 # SPDX-License-Identifier: MIT
 [CmdletBinding()]
-param([ValidateSet('Open','ClientOnly','Check','ResetExit')][string]$Mode = 'Open')
+param([ValidateSet('Open','ClientOnly','Check','CheckExit','ResetExit')][string]$Mode = 'Open')
 
 $ErrorActionPreference = 'Stop'
 $guard = Join-Path $PSScriptRoot 'web-guard.ps1'
@@ -81,8 +81,8 @@ function Get-ExistingGuard {
     }
 }
 
-function Start-ExitGuard([int]$port) {
-    if (Get-Process -Name chrome -ErrorAction SilentlyContinue) {
+function Start-ExitGuard([int]$port, [bool]$requireIPv6 = $false, [switch]$CheckOnly) {
+    if (-not $CheckOnly -and (Get-Process -Name chrome -ErrorAction SilentlyContinue)) {
         throw '请保存工作、完全退出 Chrome（包括后台进程），再启动受出口保护的会话。'
     }
     $listener = @(Get-NetTCPConnection -LocalPort $port -State Listen | Where-Object { $_.LocalAddress -in @('127.0.0.1','0.0.0.0','::','::ffff:127.0.0.1') })
@@ -93,10 +93,13 @@ function Start-ExitGuard([int]$port) {
     if ($local.Count -ne 1) { throw '无法唯一识别 SakuraCat 的本机控制端口，已停止启动。' }
     $python = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
     if (-not (Test-Path -LiteralPath $python)) { $python = (Get-Command python.exe -ErrorAction Stop).Source }
-    Write-Host '本窗口负责持续核验代理和出口。关闭窗口会中断受保护会话的代理连接。'
-    & $python -B (Join-Path $PSScriptRoot 'exit_guard.py') --upstream $port --controller $local[0].LocalPort
+    $options = @()
+    if ($requireIPv6) { $options += '--require-ipv6' }
+    if ($CheckOnly) { $options += '--check' }
+    else { Write-Host '本窗口负责持续核验代理和出口。关闭窗口会中断受保护会话的代理连接。' }
+    & $python -B (Join-Path $PSScriptRoot 'exit_guard.py') --upstream $port --controller $local[0].LocalPort @options
     if ($LASTEXITCODE -eq 20) { throw [System.OperationCanceledException]::new('出口保护已显示具体原因。') }
-    if ($LASTEXITCODE -ne 0) { throw '出口守护程序未能运行。请检查 Python 版本和项目文件。' }
+    if ($LASTEXITCODE -ne 0) { throw '出口检查未通过，请查看上方提示。' }
 }
 
 function Invoke-CheckedLaunch {
@@ -118,6 +121,15 @@ function Invoke-CheckedLaunch {
         $guardState = '未启用'
         if (Get-ExistingGuard) { & $guard -Mode Status; $guardState = '已核验' }
         Write-Host "SakuraCat 运行=$running，本机代理端口 $port 就绪=$ready，Chrome 断线保护=$guardState"
+        return
+    }
+    $requireIPv6 = $cfg.web_require_ipv6
+    if ($cfg.PSObject.Properties['web_require_ipv6'] -and $requireIPv6 -isnot [bool]) {
+        throw 'web_require_ipv6 必须为 true 或 false。'
+    }
+    if ($Mode -eq 'CheckExit') {
+        if (-not (Test-ClientReady $port)) { throw 'SakuraCat 本机代理未就绪。' }
+        Start-ExitGuard $port ([bool]$requireIPv6) -CheckOnly
         return
     }
 
@@ -147,7 +159,7 @@ function Invoke-CheckedLaunch {
     }
     & $guard -Mode Status
     if (-not (Test-ClientReady $port)) { throw '启动前 SakuraCat 或本机代理已停止。请检查客户端。' }
-    Start-ExitGuard $port
+    Start-ExitGuard $port ([bool]$requireIPv6)
 }
 
 if ($MyInvocation.InvocationName -ne '.') {

@@ -14,6 +14,7 @@ import time
 
 ROOT = Path(__file__).resolve().parent
 IP_HOSTS = ("api.ipify.org", "api64.ipify.org")
+IPV6_HOST = "api6.ipify.org"
 REMOTE_TYPES = {
     "trojan", "shadowsocks", "shadowsocksr", "vmess", "vless", "wireguard",
     "hysteria", "hysteria2", "tuic", "snell", "http", "socks5", "anytls",
@@ -65,12 +66,28 @@ def route_at(port):
     return selected_route(get("/configs")["mode"], get("/proxies")["proxies"])
 
 
+def verify_flows(controller, upstream, source_ports, selected):
+    """Check only flows attributable to open sockets of this browser relay."""
+    conn = http.client.HTTPConnection("127.0.0.1", controller, timeout=1)
+    flows = json.loads(read_reply(conn, "/connections", 4_000_000))["connections"]
+    if not isinstance(flows, list):
+        raise GuardError("无法读取 SakuraCat 活动连接。")
+    for flow in flows:
+        meta = flow["metadata"]
+        if (meta.get("sourceIP") not in {"127.0.0.1", "::ffff:127.0.0.1"} or
+                str(meta.get("sourcePort")) not in source_ports or str(meta.get("inboundPort")) != str(upstream)):
+            continue
+        if tuple(reversed(flow.get("chains") or ())) != selected:
+            raise GuardError("SakuraCat 报告此 Chrome 连接的实际路径与登记节点不符。")
+
+
 def exit_at(port, host):
     # CONNECT to the loopback proxy only. TLS verifies the remote IP service.
     conn = http.client.HTTPSConnection("127.0.0.1", port, timeout=4, context=ssl.create_default_context())
     conn.set_tunnel(host, 443)
     address = ipaddress.ip_address(read_reply(conn, "/", 80).strip().decode("ascii"))
-    if not address.is_global or (host == IP_HOSTS[0] and address.version != 4):
+    required_family = {IP_HOSTS[0]: 4, IPV6_HOST: 6}.get(host)
+    if not address.is_global or (required_family and address.version != required_family):
         raise GuardError("检测站返回的地址无效。")
     return str(address)
 
@@ -81,10 +98,26 @@ def dialog(message, confirm=False, title="Chrome 出口保护"):
     return ctypes.windll.user32.MessageBoxW(None, message, title, style) == 6
 
 
+def verify_saved_pin(path, observed):
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(saved, list) and len(saved) == 2:
+        # Older installs recorded IPv4 and dual stack. Two IPv4 answers never establish IPv6 trust.
+        saved.append(saved[1] if ipaddress.ip_address(saved[1]).version == 6 else None)
+    if not isinstance(saved, list) or len(saved) != 3 or saved[:2] != list(observed[:2]):
+        raise GuardError("出口与本机已确认的地址不符。请检查节点。")
+    if saved[2] != observed[2]:
+        if observed[2] is None:
+            raise GuardError("此前登记的 IPv6 出口未能核验。请检查代理。")
+        raise GuardError("发现新增或变化的 IPv6 出口。请核实节点，确需重新登记时使用 ResetExit。")
+
+
 def confirm_pin(path, observed):
+    prompted = False
     if not path.exists():
-        addresses = " / ".join(dict.fromkeys(observed))
-        if not dialog(f"本次通过代理测到的出口为 {addresses}。请核对这是你信任的出口。保存到本机并继续吗？", True):
+        prompted = True
+        addresses = " / ".join(dict.fromkeys(ip for ip in observed if ip))
+        note = "" if observed[2] else " IPv6 未核验。"
+        if not dialog(f"本次通过代理测到的出口为 {addresses}。{note}请核对这是你信任的出口。保存到本机并继续吗？", True):
             raise GuardError("未确认可信出口。")
         path.parent.mkdir(exist_ok=True, parents=True)
         try:
@@ -92,8 +125,8 @@ def confirm_pin(path, observed):
                 json.dump(observed, stream)
         except FileExistsError:
             pass  # Concurrent enrollment must agree with the other writer.
-    if json.loads(path.read_text(encoding="utf-8")) != list(observed):
-        raise GuardError("出口与本机已确认的地址不符。请检查节点。")
+    verify_saved_pin(path, observed)
+    return prompted
 
 
 async def observed_ips(upstream):
@@ -102,11 +135,31 @@ async def observed_ips(upstream):
     )), 6))
 
 
+async def observed_ipv6(upstream):
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(exit_at, upstream, IPV6_HOST), 5)
+    except ssl.SSLError as error:
+        raise GuardError("IPv6 检测的 TLS 校验或连接失败。") from error
+    except (OSError, asyncio.TimeoutError):
+        return None  # Unknown coverage, not proof of an IPv4-only network.
+
+
+def check_families(ips, ipv6, required):
+    dual_v6 = ipaddress.ip_address(ips[1]).version == 6
+    if not dual_v6 and ips[0] != ips[1]:
+        raise GuardError("IPv4 与双栈检测看到了不同的 IPv4 出口。请核实代理。")
+    if ipv6 is None and (required or dual_v6):
+        raise GuardError("独立 IPv6 出口未能核验，已停止启动。")
+    if dual_v6 and ips[1] != ipv6:
+        raise GuardError("双栈与 IPv6 专用检测看到了不同的 IPv6 出口。请核实代理。")
+
+
 class Gate:
     def __init__(self, upstream):
         self.upstream = upstream
         self.deadlines = {"route": 0.0, "ip": 0.0}
         self.writers = set()
+        self.source_ports = set()
         self.reason = None
         self.stopped = asyncio.Event()
 
@@ -132,6 +185,7 @@ class Gate:
     async def handle(self, client, downstream):
         writers = [downstream]
         tasks = []
+        source_port = None
         self.writers.add(downstream)
         try:
             if not self.allowed():
@@ -139,6 +193,8 @@ class Gate:
             remote, upstream = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", self.upstream), 2)
             writers.append(upstream)
             self.writers.add(upstream)
+            source_port = str(upstream.get_extra_info("sockname")[1])
+            self.source_ports.add(source_port)
             if not self.allowed():
                 return
             tasks = [asyncio.create_task(self.pump(client, upstream)),
@@ -147,6 +203,7 @@ class Gate:
         except (OSError, asyncio.TimeoutError):
             pass
         finally:
+            self.source_ports.discard(source_port)
             for writer in writers:
                 self.writers.discard(writer)
                 writer.close()
@@ -160,37 +217,68 @@ async def watch(gate, key, sample, expected, interval, ttl):
         while gate.allowed():
             start = time.monotonic()
             if await sample() != expected:
-                gate.block("代理节点或路由发生变化。" if key == "route" else "检测到出口 IP 变化。")
+                reasons = {"route": "代理节点或路由发生变化。", "ip": "检测到出口 IP 变化。",
+                           "ipv6": "IPv6 出口新增、改变或无法继续核验。"}
+                gate.block(reasons[key])
                 return
             # A timeout or machine resume must never silently renew a stale lease.
             if not gate.allowed():
                 return
             gate.deadlines[key] = start + ttl
             await asyncio.sleep(interval)
+    except GuardError as error:
+        gate.block(str(error))
     except Exception:
         gate.block("无法核实代理路径或出口。")
 
 
-async def run_session(upstream, controller):
+async def run_session(upstream, controller, require_ipv6=False, check_only=False):
     async def route():
         return await asyncio.wait_for(asyncio.to_thread(route_at, controller), 2.5)
 
     async def ips():
         return await observed_ips(upstream)
 
+    async def ipv6():
+        return await observed_ipv6(upstream)
+
     selection = await route()
-    baseline = await ips()
-    confirm_pin(ROOT / "state" / "web-exit.json", baseline)
-    # Recheck both after any dialog, before binding the relay or starting Chrome.
-    if await ips() != baseline or await route() != selection:
-        raise GuardError("确认期间代理路径或出口已变。")
+    baseline, v6 = await asyncio.gather(ips(), ipv6())
+    pin = ROOT / "state" / "web-exit.json"
+    observed = (*baseline, v6)
+    family = ipaddress.ip_address(baseline[1]).version
+    coverage = "独立 IPv6 已测得。" if v6 else "独立 IPv6 未核验，特定网站可能仍有 IPv6 出口。"
+    print(f"IPv4 已测得；双栈接口本次返回 IPv{family}；{coverage}", flush=True)
+    check_families(baseline, v6, require_ipv6)
+    if check_only:
+        if pin.exists():
+            verify_saved_pin(pin, observed)
+            print("已测得的出口与本机登记一致。", flush=True)
+        else:
+            print("本机尚未登记可信出口。", flush=True)
+        return
+    if confirm_pin(pin, observed):
+        # A user may have kept the confirmation dialog open while the network changed.
+        if await asyncio.gather(ips(), ipv6()) != [baseline, v6]:
+            raise GuardError("确认期间代理出口已变。")
+    if await route() != selection:
+        raise GuardError("确认期间代理路径已变。")
     gate = Gate(upstream)
+
+    async def active_route():
+        selected = await route()
+        if selected == selection and gate.source_ports:
+            ports = gate.source_ports.copy()
+            await asyncio.wait_for(asyncio.to_thread(verify_flows, controller, upstream, ports, selection[0]), 1.5)
+        return selected
+
     now = time.monotonic()
-    gate.deadlines.update(route=now + 5, ip=now + 16)
+    gate.deadlines.update(route=now + 5, ip=now + 16, ipv6=now + 16)
     async with await asyncio.start_server(gate.handle, "127.0.0.1", 0) as server:
         port = server.sockets[0].getsockname()[1]
-        tasks = [asyncio.create_task(watch(gate, "route", route, selection, 1, 5)),
-                 asyncio.create_task(watch(gate, "ip", ips, baseline, 5, 16))]
+        tasks = [asyncio.create_task(watch(gate, "route", active_route, selection, 1, 5)),
+                 asyncio.create_task(watch(gate, "ip", ips, baseline, 5, 16)),
+                 asyncio.create_task(watch(gate, "ipv6", ipv6, v6, 5, 16))]
         try:
             chrome = await asyncio.create_subprocess_exec(
                 "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
@@ -215,15 +303,22 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--upstream", required=True, type=int)
     parser.add_argument("--controller", required=True, type=int)
+    parser.add_argument("--check", action="store_true")
+    parser.add_argument("--require-ipv6", action="store_true")
     args = parser.parse_args()
     try:
-        asyncio.run(run_session(args.upstream, args.controller))
+        asyncio.run(run_session(args.upstream, args.controller, args.require_ipv6, args.check))
     except (Exception, KeyboardInterrupt) as exc:
         reason = str(exc) if isinstance(exc, GuardError) else "出口核验未完成或守护程序已停止。"
+        if args.check:
+            print(reason, file=sys.stderr)
+            return 1
         dialog(reason)
         return 20  # The desktop launcher can suppress a duplicate error dialog.
     return 0
 
 
 if __name__ == "__main__":
+    sys.stdout.reconfigure(errors="backslashreplace")
+    sys.stderr.reconfigure(errors="backslashreplace")
     sys.exit(main())
