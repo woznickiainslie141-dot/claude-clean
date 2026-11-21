@@ -8,6 +8,12 @@ Windows 上的独立浏览器启动器、HTTP / SOCKS5 代理中继，以及可�
 
 ## 功能
 
+**如果你已经在原生 Google Chrome 登录，只想在代理断开时阻止直接出网**，请先在 Windows 开启手动本机 HTTP 代理，保存工作并完全退出 Chrome，双击 `protect-web.bat`。同意 UAC 后，工具先核对 Windows 防火墙的有效规则，再用原生 Chrome 打开空白窗口。浏览器继续使用自己的资料和登录状态。此入口无需 Python，不发起网站预检。
+
+规则针对已安装的 `chrome.exe` 的所有窗口、所有协议及三个防火墙配置文件，阻止访问回环以外的 IPv4/IPv6 地址。代理掉线、系统代理被关闭或浏览器尝试直接联网时，网页可能显示网络错误。规则在浏览器关闭和系统重启后仍保留。查看状态用 `powershell -NoProfile -ExecutionPolicy Bypass -File .\web-guard.ps1 -Mode Status`。恢复正常出网前先退出 Chrome，再双击 `unprotect-web.bat`。适用于单一标准路径安装的 Google Chrome 和本机回环代理。
+
+这层保护能约束 Chrome 自身发出的连接。代理客户端把流量分到 DIRECT、节点更换出口 IP、Windows 系统服务、其他浏览器、指纹内核和 Claude 桌面版都在规则范围之外。窗口能登录或通过检测也不能证明账号会得到怎样的处理。
+
 - 以独立的浏览器资料目录启动 Chrome / Edge，保留自己的登录状态。
 - 检测服务域名和 IP 查询服务看到的出口，提示地址或时区差异。
 - 用浏览器调试协议设置页面时区和 locale；尝试限制非代理 WebRTC 流量。

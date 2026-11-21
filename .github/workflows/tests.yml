@@ -31,3 +31,7 @@ jobs:
             if ($errors.Count) { $errors | ForEach-Object { Write-Error $_ }; $failed = $true }
           }
           if ($failed) { exit 1 }
+      - name: Exercise Chrome guard on disposable Windows runner
+        if: runner.os == 'Windows' && matrix.python == '3.12'
+        shell: powershell
+        run: .\tests\web-guard-ci.ps1

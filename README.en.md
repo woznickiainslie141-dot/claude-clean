@@ -8,6 +8,8 @@ A Windows isolated-browser launcher and local HTTP/SOCKS5 relay, with optional r
 
 ## Quick start
 
+For an existing native Google Chrome login, enable a manual loopback HTTP proxy in Windows, fully quit Chrome and run `protect-web.bat`. It installs and verifies a persistent outbound Windows Firewall rule for the installed Chrome executable, then opens a blank window with its normal profile. This entry point does not probe any website. It affects all windows of that Chrome installation. If the proxy disappears or Chrome tries to connect directly, non-loopback connections are blocked. Quit Chrome and run `unprotect-web.bat` to remove this rule. Check the effective policy with `web-guard.ps1 -Mode Status`. This requires a single standard Chrome installation and an enabled Windows firewall. The proxy client's own routing and changes to its exit IP, OS services and desktop applications are outside this rule's scope.
+
 1. Install Python 3.10+ and Chrome or Edge on Windows 10/11.
 2. Download and extract this repository. Run `setup.bat` to create `.venv`, install dependencies, and create `config.json` if absent.
 3. Edit `proxy` in `config.json`. The example `http://127.0.0.1:7890` requires your own local proxy client listening there.
