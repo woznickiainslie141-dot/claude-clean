@@ -221,7 +221,7 @@ def main():
     except (Exception, KeyboardInterrupt) as exc:
         reason = str(exc) if isinstance(exc, GuardError) else "出口核验未完成或守护程序已停止。"
         dialog(reason)
-        return 1
+        return 20  # The desktop launcher can suppress a duplicate error dialog.
     return 0
 
 

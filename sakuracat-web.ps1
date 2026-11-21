@@ -95,7 +95,8 @@ function Start-ExitGuard([int]$port) {
     if (-not (Test-Path -LiteralPath $python)) { $python = (Get-Command python.exe -ErrorAction Stop).Source }
     Write-Host '本窗口负责持续核验代理和出口。关闭窗口会中断受保护会话的代理连接。'
     & $python -B (Join-Path $PSScriptRoot 'exit_guard.py') --upstream $port --controller $local[0].LocalPort
-    if ($LASTEXITCODE -ne 0) { throw '出口保护会话已停止。' }
+    if ($LASTEXITCODE -eq 20) { throw [System.OperationCanceledException]::new('出口保护已显示具体原因。') }
+    if ($LASTEXITCODE -ne 0) { throw '出口守护程序未能运行。请检查 Python 版本和项目文件。' }
 }
 
 function Invoke-CheckedLaunch {
@@ -145,9 +146,17 @@ function Invoke-CheckedLaunch {
         & $guard -Mode On
     }
     & $guard -Mode Status
-    if (-not (Confirm-WebAction '启用持续出口保护并打开 Chrome 空白窗口吗？程序会仅经代理定期向 ipify 核对出口。首次需确认可信 IP。')) { return }
-    if (-not (Test-ClientReady $port)) { throw '确认期间 SakuraCat 或本机代理已停止，已取消打开 Chrome。' }
+    if (-not (Test-ClientReady $port)) { throw '启动前 SakuraCat 或本机代理已停止。请检查客户端。' }
     Start-ExitGuard $port
 }
 
-if ($MyInvocation.InvocationName -ne '.') { Invoke-CheckedLaunch }
+if ($MyInvocation.InvocationName -ne '.') {
+    try { Invoke-CheckedLaunch }
+    catch {
+        if ($Mode -eq 'Open' -and $_.Exception -isnot [System.OperationCanceledException]) {
+            Add-Type -AssemblyName System.Windows.Forms
+            [void][Windows.Forms.MessageBox]::Show(($_.Exception.Message + "`n请检查后从桌面入口重试。"), 'Chrome 启动检查', 'OK', 'Warning')
+        }
+        throw
+    }
+}

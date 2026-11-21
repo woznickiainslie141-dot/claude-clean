@@ -158,7 +158,8 @@ if ($Mode -eq 'Open') {
                 throw 'A Windows Chrome proxy policy may override the session proxy. Launch stopped.'
             }
         }
-        $arguments = @("--proxy-server=http://127.0.0.1:$LocalProxyPort",'--disable-quic','--new-window','about:blank')
+        $arguments = @("--proxy-server=http://127.0.0.1:$LocalProxyPort",'--disable-quic',
+            '--force-webrtc-ip-handling-policy=disable_non_proxied_udp','--new-window','about:blank')
         $browser = Start-Process -FilePath $chrome -ArgumentList $arguments -PassThru
         $browser.WaitForExit()
         return

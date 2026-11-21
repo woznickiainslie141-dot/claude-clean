@@ -22,8 +22,9 @@ using System.Net.Sockets;
 public class SocketProbe {
     public static int Main(string[] args) {
         try {
-            if (args.Length == 4 && args[0].StartsWith("--proxy-server=") &&
-                args[1] == "--disable-quic" && args[2] == "--new-window" && args[3] == "about:blank") {
+            if (args.Length == 5 && args[0].StartsWith("--proxy-server=") && args[1] == "--disable-quic" &&
+                args[2] == "--force-webrtc-ip-handling-policy=disable_non_proxied_udp" &&
+                args[3] == "--new-window" && args[4] == "about:blank") {
                 var proxy = new Uri(args[0].Substring("--proxy-server=".Length));
                 using (var client = new TcpClient()) {
                     client.Connect(IPAddress.Loopback, proxy.Port);

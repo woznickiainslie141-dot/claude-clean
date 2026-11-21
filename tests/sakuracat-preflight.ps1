@@ -102,12 +102,11 @@ try {
         Write-Host "$label OK"
     }
     Test-LaunchCase 'Decline client' $false $false @($false) @() $false '*SakuraCat*' 'ask'
-    Test-LaunchCase 'Start missing client and install guard' $false $false @($true,$true,$true) @($false,$true,$true) $false '' 'ask,start-client,ask,guard-On,guard-Status,ask,exit-guard7890'
+    Test-LaunchCase 'Start missing client and install guard' $false $false @($true,$true) @($false,$true,$true) $false '' 'ask,start-client,ask,guard-On,guard-Status,exit-guard7890'
     Test-LaunchCase 'Decline guard' $true $false @($false) @($true) $false '' 'ask'
     Test-LaunchCase 'Altered guard' $true $true @() @($true) $true '*Invalid firewall*' 'guard-Status'
-    Test-LaunchCase 'Decline Chrome' $true $true @($false) @($true) $false '' 'guard-Status,ask'
-    Test-LaunchCase 'Proxy drops during confirmation' $true $true @($true) @($true,$false) $false '*SakuraCat*' 'guard-Status,ask'
-    Test-LaunchCase 'Existing client and guard' $true $true @($true) @($true) $false '' 'guard-Status,ask,exit-guard7890'
+    Test-LaunchCase 'Proxy drops before launch' $true $true @() @($true,$false) $false '*SakuraCat*' 'guard-Status'
+    Test-LaunchCase 'Healthy launch without dialog' $true $true @() @($true) $false '' 'guard-Status,exit-guard7890'
     Test-LaunchCase 'Client check before elevation' $true $false @() @($true) $false '' '' 'ClientOnly'
     Test-LaunchCase 'Local proxy stays unavailable' $true $true @() @($false) $false '*7890*' ''
 } finally {

@@ -8,6 +8,8 @@ Claude Clean 是从 DSH 辅助生成的个人 Python / PowerShell 脚本整理�
 
 ## 实际使用的可选组件
 
+随仓库提供的 Android 守护文件由本项目的 Java 源码生成，使用 JDK 的 javac 和 Android SDK Build Tools 的 D8 构建。构建命令和源码位于 android 目录。[Android D8 文档](https://developer.android.com/tools/d8)
+
 | 项目 | 使用方式 | 许可及处理 |
 |---|---|---|
 | [adryfish/fingerprint-chromium](https://github.com/adryfish/fingerprint-chromium) | 可选外部浏览器进程；下载器从它的 Releases 下载 Windows x64 ZIP。本仓库没有浏览器源码或二进制 | 上游仓库标注 BSD-3-Clause；[上游许可证](https://github.com/adryfish/fingerprint-chromium/blob/main/LICENSE) 的原文存于 [LICENSES/fingerprint-chromium-BSD-3-Clause.txt](LICENSES/fingerprint-chromium-BSD-3-Clause.txt) |
