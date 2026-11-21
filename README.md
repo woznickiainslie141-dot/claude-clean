@@ -6,6 +6,12 @@ Windows 上的独立浏览器启动器、HTTP / SOCKS5 代理中继，以及可�
 
 **你需要自己准备可用的代理。** 本项目不提供美国 IP、代理节点、账号或订阅。它可以按代理出口设置浏览器的时区和语言，但不能保证匿名、所有网络流量都经过代理，或账号不被限制。它与 Anthropic 没有隶属或合作关系。
 
+## 使用 SakuraCat 打开原生 Chrome
+
+把 `config.example.json` 复制为 `config.json`，填写 SakuraCat 的本机 HTTP 代理（例如 `http://127.0.0.1:7890`），双击 `sakuracat-web.bat`。客户端未运行时，窗口会询问是否启动 SakuraCat。工具会等候当前用户的客户端和后台服务端口就绪。首次启用防火墙保护需先退出 Chrome 并确认 UAC。最后单独询问是否打开 Chrome 空白页，所有询问默认选“否”。
+
+全局 TUN 可以保持开启。此入口让新启动的 Chrome 使用配置里的本机 HTTP 端口，因此客户端也须提供这个端口。已有 Chrome 会话如果使用不同代理，请先退出后重开。客户端安装在自定义位置且无法通过快捷方式发现时，可在本机配置增加 `sakuracat_path`。用 `sakuracat-web.bat -Mode Check` 可以只查看本机状态。检查结果说明客户端、端口和规则的状态，远端节点是否可用、出口是否变化仍由代理侧决定。普通 Chrome 图标和其他程序打开的链接不会经过此启动器。
+
 ## 功能
 
 **如果你已经在原生 Google Chrome 登录，只想在代理断开时阻止直接出网**，请先在 Windows 开启手动本机 HTTP 代理，保存工作并完全退出 Chrome，双击 `protect-web.bat`。同意 UAC 后，工具先核对 Windows 防火墙的有效规则，再用原生 Chrome 打开空白窗口。浏览器继续使用自己的资料和登录状态。此入口无需 Python，不发起网站预检。

@@ -3,7 +3,8 @@
 [CmdletBinding()]
 param(
     [ValidateSet('On','Off','Status','Open')][string]$Mode = 'Status',
-    [string]$CallerSid
+    [string]$CallerSid,
+    [ValidateRange(0,65535)][int]$LocalProxyPort = 0
 )
 $ErrorActionPreference = 'Stop'
 $ruleName = 'ClaudeClean.NativeChrome.LoopbackOnly.v1'
@@ -77,7 +78,7 @@ function Assert-ChromeClosed {
     }
 }
 
-function Check-Proxy {
+function Check-Proxy([int]$expectedPort = 0) {
     $settings = Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings'
     if ($settings.ProxyEnable -ne 1 -or $settings.AutoConfigURL -or
         $settings.ProxyServer -notmatch '^(127\.0\.0\.1|\[::1\]):([0-9]{1,5})$') {
@@ -85,12 +86,35 @@ function Check-Proxy {
     }
     $ip = [ipaddress]::Parse($Matches[1].Trim('[',']'))
     $port = [int]$Matches[2]
+    if ($expectedPort -and ($port -ne $expectedPort -or -not $ip.Equals([ipaddress]::Loopback))) {
+        throw 'Chrome is already open. Fully quit it to start with the checked SakuraCat proxy.'
+    }
     $socket = New-Object Net.Sockets.TcpClient $ip.AddressFamily
     try {
         if (-not $socket.ConnectAsync($ip, $port).Wait(1500)) { throw 'Local proxy timeout.' }
     } finally { $socket.Dispose() }
 }
 
+function Assert-RunningChromeProxy([string]$chrome, [int]$port) {
+    # A running Chrome instance can ignore a second process's proxy switch.
+    if (-not (Get-Process -Name chrome -ErrorAction SilentlyContinue)) { return }
+    $running = @(Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" |
+        Where-Object { $_.CommandLine -notmatch '(?:^|\s)"?--type=' })
+    if (-not $running.Count) { throw 'Chrome is starting. Wait for it or quit it before retrying.' }
+    foreach ($instance in $running) {
+        if ($instance.ExecutablePath -ne $chrome -or -not $instance.CommandLine -or
+            $instance.CommandLine -match '(?:^|\s)"?--(?:no-proxy-server|proxy-pac-url|proxy-auto-detect|proxy-bypass-list)\b') {
+            throw 'Could not confirm the running Chrome proxy. Fully quit Chrome, then retry.'
+        }
+        $switches = [regex]::Matches($instance.CommandLine,'(?i)(?:^|\s)"?--proxy-server\b')
+        if ($switches.Count -eq 0) { Check-Proxy $port; continue }
+        if ($switches.Count -ne 1 -or $instance.CommandLine -notmatch "(?:^|\s)\x22?--proxy-server=\x22?http://127\.0\.0\.1:$port\x22?(?:\s|$)") {
+            throw 'Running Chrome uses another proxy. Quit it before retrying.'
+        }
+    }
+}
+
+if ($MyInvocation.InvocationName -eq '.') { return }
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 if ($CallerSid -and $CallerSid -ne $identity.User.Value) { throw 'Run as the same Windows account.' }
 $isAdmin = ([Security.Principal.WindowsPrincipal]$identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -124,6 +148,12 @@ if ($Mode -eq 'On') {
 Assert-Effective $chrome
 Write-Host "Chrome web guard: ACTIVE for $chrome (all windows)."
 if ($Mode -eq 'Open') {
-    Check-Proxy
-    Start-Process -FilePath $chrome -ArgumentList '--new-window about:blank'
+    if ($LocalProxyPort) {
+        Assert-RunningChromeProxy $chrome $LocalProxyPort
+        $arguments = @("--proxy-server=http://127.0.0.1:$LocalProxyPort",'--new-window','about:blank')
+        Start-Process -FilePath $chrome -ArgumentList $arguments
+    } else {
+        Check-Proxy
+        Start-Process -FilePath $chrome -ArgumentList '--new-window about:blank'
+    }
 }
