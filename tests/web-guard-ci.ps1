@@ -6,7 +6,7 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hoste
 $originalPF = $env:ProgramFiles
 $originalPF86 = ${env:ProgramFiles(x86)}
 $originalLocal = $env:LOCALAPPDATA
-if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole('Administrator')) {
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw 'The disposable test runner needs administrator privileges for this integration test.'
 }
 $guard = Join-Path (Split-Path -Parent $PSScriptRoot) 'web-guard.ps1'

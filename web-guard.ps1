@@ -93,7 +93,9 @@ function Check-Proxy {
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 if ($CallerSid -and $CallerSid -ne $identity.User.Value) { throw 'Run as the same Windows account.' }
-if ($Mode -in @('On','Off') -and -not ([Security.Principal.WindowsPrincipal]$identity).IsInRole('Administrator')) {
+$isAdmin = ([Security.Principal.WindowsPrincipal]$identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if ($Mode -in @('On','Off') -and -not $isAdmin) {
+    if ($CallerSid) { throw 'Elevation did not produce an administrator token.' }
     $argsLine = ('-NoProfile -ExecutionPolicy Bypass -File "{0}" -Mode {1} -CallerSid {2}' -f $PSCommandPath,$Mode,$identity.User.Value)
     $child = Start-Process powershell.exe -Verb RunAs -ArgumentList $argsLine -Wait -PassThru
     if ($child.ExitCode -ne 0) { throw 'Guard change did not complete. Read the elevated error and check Status.' }
