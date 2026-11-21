@@ -121,9 +121,8 @@ async def monitor(phone, stop_app):
     route = await asyncio.to_thread(phone.route)
     pinned = await asyncio.wait_for(asyncio.to_thread(phone.exit_ip), 7)
     action = "异常时将通过 USB 请求停止手机上的 Claude。" if stop_app else "异常时将在电脑上提醒。"
-    if not dialog(f"手机 IPv4 出口为 {pinned}，请确认这是你信任的节点。{action} 开始本次监测吗？", True, TITLE):
+    if not dialog(f"手机 IPv4 出口为 {pinned}，请确认这是你信任的节点。{action} 监测期间请保持此窗口开启。现在开始吗？", True, TITLE):
         return
-    print("USB 监测中。关闭窗口结束监测。", flush=True)
     try:
         while True:
             await asyncio.to_thread(require_protection, phone)
@@ -170,4 +169,6 @@ def main():
 
 
 if __name__ == "__main__":
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
     sys.exit(main())
