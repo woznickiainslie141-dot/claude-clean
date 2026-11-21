@@ -67,6 +67,7 @@ try {
         return $script:ready
     }
     function Get-ExistingGuard { return $script:installed }
+    function Start-ExitGuard([int]$port) { $script:events.Add("exit-guard$port") }
     function Get-ClientPath { return 'C:\Fixture\SakuraCat.exe' }
     function Start-Process { $script:events.Add('start-client'); $script:running = $true }
     function Confirm-WebAction($message) {
@@ -101,12 +102,12 @@ try {
         Write-Host "$label OK"
     }
     Test-LaunchCase 'Decline client' $false $false @($false) @() $false '*SakuraCat*' 'ask'
-    Test-LaunchCase 'Start missing client and install guard' $false $false @($true,$true,$true) @($false,$true,$true) $false '' 'ask,start-client,ask,guard-On,guard-Status,ask,guard-Open7890'
+    Test-LaunchCase 'Start missing client and install guard' $false $false @($true,$true,$true) @($false,$true,$true) $false '' 'ask,start-client,ask,guard-On,guard-Status,ask,exit-guard7890'
     Test-LaunchCase 'Decline guard' $true $false @($false) @($true) $false '' 'ask'
     Test-LaunchCase 'Altered guard' $true $true @() @($true) $true '*Invalid firewall*' 'guard-Status'
     Test-LaunchCase 'Decline Chrome' $true $true @($false) @($true) $false '' 'guard-Status,ask'
     Test-LaunchCase 'Proxy drops during confirmation' $true $true @($true) @($true,$false) $false '*SakuraCat*' 'guard-Status,ask'
-    Test-LaunchCase 'Existing client and guard' $true $true @($true) @($true) $false '' 'guard-Status,ask,guard-Open7890'
+    Test-LaunchCase 'Existing client and guard' $true $true @($true) @($true) $false '' 'guard-Status,ask,exit-guard7890'
     Test-LaunchCase 'Client check before elevation' $true $false @() @($true) $false '' '' 'ClientOnly'
     Test-LaunchCase 'Local proxy stays unavailable' $true $true @() @($false) $false '*7890*' ''
 } finally {

@@ -4,7 +4,8 @@
 param(
     [ValidateSet('On','Off','Status','Open')][string]$Mode = 'Status',
     [string]$CallerSid,
-    [ValidateRange(0,65535)][int]$LocalProxyPort = 0
+    [ValidateRange(0,65535)][int]$LocalProxyPort = 0,
+    [switch]$WaitForGuardedChrome
 )
 $ErrorActionPreference = 'Stop'
 $ruleName = 'ClaudeClean.NativeChrome.LoopbackOnly.v1'
@@ -148,6 +149,20 @@ if ($Mode -eq 'On') {
 Assert-Effective $chrome
 Write-Host "Chrome web guard: ACTIVE for $chrome (all windows)."
 if ($Mode -eq 'Open') {
+    if ($WaitForGuardedChrome) {
+        if (-not $LocalProxyPort) { throw 'The guarded session requires its local monitor port.' }
+        Assert-ChromeClosed
+        foreach ($key in 'HKCU:\Software\Policies\Google\Chrome','HKLM:\Software\Policies\Google\Chrome','HKLM:\Software\WOW6432Node\Policies\Google\Chrome') {
+            if ((Test-Path -LiteralPath $key) -and
+                (((Get-Item -LiteralPath $key).GetValueNames() -match '^Proxy') -or (Test-Path -LiteralPath (Join-Path $key 'ProxySettings')))) {
+                throw 'A Windows Chrome proxy policy may override the session proxy. Launch stopped.'
+            }
+        }
+        $arguments = @("--proxy-server=http://127.0.0.1:$LocalProxyPort",'--disable-quic','--new-window','about:blank')
+        $browser = Start-Process -FilePath $chrome -ArgumentList $arguments -PassThru
+        $browser.WaitForExit()
+        return
+    }
     if ($LocalProxyPort) {
         Assert-RunningChromeProxy $chrome $LocalProxyPort
         $arguments = @("--proxy-server=http://127.0.0.1:$LocalProxyPort",'--new-window','about:blank')

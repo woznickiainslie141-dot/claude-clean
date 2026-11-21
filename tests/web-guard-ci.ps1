@@ -22,6 +22,15 @@ using System.Net.Sockets;
 public class SocketProbe {
     public static int Main(string[] args) {
         try {
+            if (args.Length == 4 && args[0].StartsWith("--proxy-server=") &&
+                args[1] == "--disable-quic" && args[2] == "--new-window" && args[3] == "about:blank") {
+                var proxy = new Uri(args[0].Substring("--proxy-server=".Length));
+                using (var client = new TcpClient()) {
+                    client.Connect(IPAddress.Loopback, proxy.Port);
+                    client.GetStream().WriteByte(42);
+                    return 0;
+                }
+            }
             var ip = IPAddress.Parse(args[0]);
             using (var client = new TcpClient(ip.AddressFamily)) {
                 return client.ConnectAsync(ip, int.Parse(args[1])).Wait(3500) ? 0 : 1;
@@ -44,6 +53,12 @@ try {
     & $guard -Mode On
     & $guard -Mode On
     & $guard -Mode Status
+    & $guard -Mode Open -LocalProxyPort $listener.LocalEndpoint.Port -WaitForGuardedChrome
+    if (-not $listener.Pending()) { throw 'The stand-in browser did not reach its specified guard port.' }
+    $probeClient = $listener.AcceptTcpClient()
+    try {
+        if ($probeClient.GetStream().ReadByte() -ne 42) { throw 'Wrong test browser launch arguments.' }
+    } finally { $probeClient.Close() }
     & $exe '127.0.0.1' $listener.LocalEndpoint.Port
     if ($LASTEXITCODE -ne 0) { throw 'Guard unexpectedly blocked the local proxy.' }
     & $exe $publicIP 443

@@ -1,7 +1,7 @@
 ﻿#Requires -Version 5.1
 # SPDX-License-Identifier: MIT
 [CmdletBinding()]
-param([ValidateSet('Open','ClientOnly','Check')][string]$Mode = 'Open')
+param([ValidateSet('Open','ClientOnly','Check','ResetExit')][string]$Mode = 'Open')
 
 $ErrorActionPreference = 'Stop'
 $guard = Join-Path $PSScriptRoot 'web-guard.ps1'
@@ -81,7 +81,32 @@ function Get-ExistingGuard {
     }
 }
 
+function Start-ExitGuard([int]$port) {
+    if (Get-Process -Name chrome -ErrorAction SilentlyContinue) {
+        throw '请保存工作、完全退出 Chrome（包括后台进程），再启动受出口保护的会话。'
+    }
+    $listener = @(Get-NetTCPConnection -LocalPort $port -State Listen | Where-Object { $_.LocalAddress -in @('127.0.0.1','0.0.0.0','::','::ffff:127.0.0.1') })
+    $owners = @($listener.OwningProcess | Select-Object -Unique)
+    if ($owners.Count -ne 1 -or -not (Test-SakuraListener $port)) { throw '无法核验 SakuraCat 代理进程。' }
+    $local = @(Get-NetTCPConnection -State Listen -OwningProcess $owners[0] |
+        Where-Object { $_.LocalAddress -eq '127.0.0.1' -and $_.LocalPort -ne $port })
+    if ($local.Count -ne 1) { throw '无法唯一识别 SakuraCat 的本机控制端口，已停止启动。' }
+    $python = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
+    if (-not (Test-Path -LiteralPath $python)) { $python = (Get-Command python.exe -ErrorAction Stop).Source }
+    Write-Host '本窗口负责持续核验代理和出口。关闭窗口会中断受保护会话的代理连接。'
+    & $python -B (Join-Path $PSScriptRoot 'exit_guard.py') --upstream $port --controller $local[0].LocalPort
+    if ($LASTEXITCODE -ne 0) { throw '出口保护会话已停止。' }
+}
+
 function Invoke-CheckedLaunch {
+    if ($Mode -eq 'ResetExit') {
+        if (Get-Process -Name chrome -ErrorAction SilentlyContinue) { throw '请先完全退出 Chrome。' }
+        $pin = Join-Path $PSScriptRoot 'state\web-exit.json'
+        if ((Test-Path -LiteralPath $pin) -and (Confirm-WebAction '忘记已确认的 Chrome 出口？下次启动时须重新核对并确认新地址。')) {
+            Remove-Item -LiteralPath $pin
+        }
+        return
+    }
     $cfg = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $PSScriptRoot 'config.json') | ConvertFrom-Json
     if ([string]$cfg.proxy -notmatch '^http://127\.0\.0\.1:([0-9]{1,5})/?$') { throw '此入口需要在 config.json 设置本机 HTTP 代理，例如 http://127.0.0.1:7890。' }
     $port = [int]$Matches[1]
@@ -120,9 +145,9 @@ function Invoke-CheckedLaunch {
         & $guard -Mode On
     }
     & $guard -Mode Status
-    if (-not (Confirm-WebAction "SakuraCat 正在运行，本机端口 $port 和 Chrome 断线保护均已就绪。打开原生 Chrome 空白窗口吗？")) { return }
+    if (-not (Confirm-WebAction '启用持续出口保护并打开 Chrome 空白窗口吗？程序会仅经代理定期向 ipify 核对出口。首次需确认可信 IP。')) { return }
     if (-not (Test-ClientReady $port)) { throw '确认期间 SakuraCat 或本机代理已停止，已取消打开 Chrome。' }
-    & $guard -Mode Open -LocalProxyPort $port
+    Start-ExitGuard $port
 }
 
 if ($MyInvocation.InvocationName -ne '.') { Invoke-CheckedLaunch }
