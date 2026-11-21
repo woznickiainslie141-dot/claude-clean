@@ -33,5 +33,6 @@ jobs:
           if ($failed) { exit 1 }
       - name: Exercise Chrome guard on disposable Windows runner
         if: runner.os == 'Windows' && matrix.python == '3.12'
+        timeout-minutes: 4
         shell: powershell
         run: .\tests\web-guard-ci.ps1

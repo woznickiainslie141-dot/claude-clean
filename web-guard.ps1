@@ -24,9 +24,12 @@ function Find-Chrome {
 }
 
 function Find-Rule([string]$store) {
-    # Enumerate by group and then match the exact name. An inaccessible policy
-    # store must raise an error instead of looking like a missing rule.
-    return Get-NetFirewallRule -PolicyStore $store | Where-Object { $_.Name -eq $ruleName }
+    try {
+        return Get-NetFirewallRule -PolicyStore $store -Name $ruleName -ErrorAction Stop
+    } catch {
+        if ($_.FullyQualifiedErrorId -like 'CmdletizationQuery_NotFound_*,Get-NetFirewallRule') { return }
+        throw
+    }
 }
 
 function Assert-Owned($rule) {
