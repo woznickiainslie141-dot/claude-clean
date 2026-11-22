@@ -148,8 +148,9 @@ class DesktopSession:
                     print("已通过桌面专用转发核对可信 IPv4；正在撤销测试会话授权。", flush=True)
                     return
                 args, env = launch_options(port, os.environ)
-                app = await asyncio.create_subprocess_exec(str(self.registered_launcher()), *args,
-                                                          env=env, cwd=self.app_dir)
+                # The ordinary account may list the package directory but lack directory execute access.
+                app = await asyncio.create_subprocess_exec(str(self.registered_launcher()), *args, env=env,
+                                                          cwd=Path(os.environ["SystemRoot"]) / "System32")
                 app_exit = asyncio.create_task(app.wait())
                 await asyncio.wait([app_exit, broker_exit, tripped], return_when=asyncio.FIRST_COMPLETED)
                 if broker_exit.done() and not app_exit.done():
