@@ -46,3 +46,18 @@ jobs:
         timeout-minutes: 4
         shell: powershell
         run: .\tests\web-guard-ci.ps1
+      - name: Exercise desktop network isolation using a stand-in application
+        if: runner.os == 'Windows' && matrix.python == '3.12'
+        timeout-minutes: 5
+        shell: powershell
+        run: .\tests\desktop-guard-ci.ps1
+      - name: Build the x64 desktop guard from the reviewed source
+        if: runner.os == 'Windows' && matrix.python == '3.12'
+        shell: cmd
+        run: build-desktop-guard.bat
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows' && matrix.python == '3.12'
+        with:
+          name: desktop-guard-windows-x64
+          path: desktop-wfp.exe
+          if-no-files-found: error

@@ -6,6 +6,7 @@ import ctypes
 import http.client
 import ipaddress
 import json
+import socket
 from pathlib import Path
 import ssl
 import sys
@@ -246,8 +247,11 @@ async def watch(gate, key, sample, expected, interval, ttl):
         gate.block("无法核实代理路径或出口。")
 
 
-async def run_session(upstream, controller, require_ipv6=False, check_only=False):
-    check_egress_policy()
+async def run_session(upstream, controller, require_ipv6=False, check_only=False, desktop=None):
+    if desktop is None:
+        check_egress_policy()
+    else:
+        desktop.check_client()
 
     async def route():
         return await asyncio.wait_for(asyncio.to_thread(route_at, controller), 2.5)
@@ -266,6 +270,10 @@ async def run_session(upstream, controller, require_ipv6=False, check_only=False
     coverage = "独立 IPv6 已测得。" if v6 else "独立 IPv6 未核验，特定网站可能仍有 IPv6 出口。"
     print(f"IPv4 已测得；双栈接口本次返回 IPv{family}；{coverage}", flush=True)
     check_families(baseline, v6, require_ipv6)
+    if desktop is not None:
+        if not pin.is_file():
+            raise GuardError("尚无已确认的出口。请先在网页保护入口登记可信出口。")
+        verify_saved_pin(pin, observed)
     if check_only:
         if pin.exists():
             verify_saved_pin(pin, observed)
@@ -273,17 +281,21 @@ async def run_session(upstream, controller, require_ipv6=False, check_only=False
         else:
             print("本机尚未登记可信出口。", flush=True)
         return
-    if confirm_pin(pin, observed):
+    if desktop is None and confirm_pin(pin, observed):
         # A user may have kept the confirmation dialog open while the network changed.
         if await asyncio.gather(ips(), ipv6()) != [baseline, v6]:
             raise GuardError("确认期间代理出口已变。")
     if await route() != selection:
         raise GuardError("确认期间代理路径已变。")
-    check_egress_policy()
+    if desktop is None:
+        check_egress_policy()
     gate = Gate(upstream)
 
     async def active_route():
-        check_egress_policy()
+        if desktop is None:
+            check_egress_policy()
+        else:
+            desktop.check_client()
         selected = await route()
         if selected == selection and gate.source_ports:
             ports = gate.source_ports.copy()
@@ -292,12 +304,26 @@ async def run_session(upstream, controller, require_ipv6=False, check_only=False
 
     now = time.monotonic()
     gate.deadlines.update(route=now + 5, ip=now + 16, ipv6=now + 16)
-    async with await asyncio.start_server(gate.handle, "127.0.0.1", 0) as server:
+    if desktop is None:
+        listener = await asyncio.start_server(gate.handle, "127.0.0.1", 0)
+    else:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            sock.bind(("127.0.0.1", 0))
+            listener = await asyncio.start_server(gate.handle, sock=sock)
+        except BaseException:
+            sock.close()
+            raise
+    async with listener as server:
         port = server.sockets[0].getsockname()[1]
         tasks = [asyncio.create_task(watch(gate, "route", active_route, selection, 1, 5)),
                  asyncio.create_task(watch(gate, "ip", ips, baseline, 5, 16)),
                  asyncio.create_task(watch(gate, "ipv6", ipv6, v6, 5, 16))]
         try:
+            if desktop is not None:
+                await desktop.run(gate, port, baseline[0])
+                return
             chrome = await asyncio.create_subprocess_exec(
                 "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                 str(ROOT / "web-guard.ps1"), "-Mode", "Open", "-LocalProxyPort", str(port), "-WaitForGuardedChrome")
@@ -323,20 +349,36 @@ def main():
     parser.add_argument("--controller", required=True, type=int)
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--require-ipv6", action="store_true")
+    parser.add_argument("--desktop", metavar="APP_DIRECTORY")
+    parser.add_argument("--client-pid", type=int)
+    parser.add_argument("--worker-pid", type=int)
+    parser.add_argument("--test-desktop-relay", action="store_true")
     args = parser.parse_args()
+    if args.test_desktop_relay and not args.desktop:
+        parser.error("--test-desktop-relay requires --desktop")
     try:
-        asyncio.run(run_session(args.upstream, args.controller, args.require_ipv6, args.check))
+        if args.desktop:
+            from desktop_guard import DesktopSession
+            if not args.client_pid or not args.worker_pid:
+                raise GuardError("桌面版守护缺少已核验的 SakuraCat 进程。")
+            with DesktopSession(ROOT, args.desktop, args.client_pid, args.worker_pid, args.upstream, args.controller,
+                                args.test_desktop_relay) as desktop:
+                asyncio.run(run_session(args.upstream, args.controller, args.require_ipv6, args.check, desktop))
+        else:
+            asyncio.run(run_session(args.upstream, args.controller, args.require_ipv6, args.check))
     except (Exception, KeyboardInterrupt) as exc:
         reason = str(exc) if isinstance(exc, GuardError) else "出口核验未完成或守护程序已停止。"
-        if args.check:
+        if args.check or args.test_desktop_relay:
             print(reason, file=sys.stderr)
             return 1
-        dialog(reason)
+        dialog(reason, title="Claude 桌面版断线保护" if args.desktop else "Chrome 出口保护")
         return 20  # The desktop launcher can suppress a duplicate error dialog.
     return 0
 
 
 if __name__ == "__main__":
+    # The desktop session imports GuardError and dialog from this running module.
+    sys.modules.setdefault("exit_guard", sys.modules[__name__])
     sys.stdout.reconfigure(errors="backslashreplace")
     sys.stderr.reconfigure(errors="backslashreplace")
     sys.exit(main())

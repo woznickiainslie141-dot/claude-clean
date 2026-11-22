@@ -8,6 +8,20 @@ A Windows isolated-browser launcher and local HTTP/SOCKS5 relay, with optional r
 
 ## Quick start
 
+### Windows desktop application
+
+The desktop guard supports the official x64 Claude MSIX package on Windows and requires Python 3.10+. It uses the trusted exit previously enrolled by the web monitor. Select a fixed remote node in SakuraCat global mode. Place `desktop-wfp.exe` beside `desktop-guard.ps1`. Extract the `desktop-guard-windows-x64` artifact from a successful Windows Actions run or build it with `build-desktop-guard.bat` using Visual Studio C++ Build Tools and a Windows SDK.
+
+Fully quit the desktop app and run `.\desktop-guard.ps1 -Mode Install` from ordinary PowerShell. Its persistent Windows Filtering Platform rules block outbound connections for the package identity and packaged executables. Launch with `-Mode Open` and keep the guard window open. Each session needs one UAC confirmation for a temporary exception to its dedicated loopback TCP relay. The desktop app runs without elevation. Launching normally from the Start menu leaves it offline while the default block is installed.
+
+The relay checks the client, listener ownership, route and saved IPs. A failed check drops active tunnels, refuses new connections and alerts the user. Losing the relay or permit process revokes the exception. Quit the app and reopen from the guarded launcher after recovery. Sampling and destination-specific upstream routing limit what exit checks can establish.
+
+Explicit proxy and resolver settings keep ordinary Electron web name resolution on the proxy path. The app filters block direct IPv4, IPv6, UDP, TCP/UDP DNS and alternate local proxies. Shared Windows DNS services, the proxy's own DNS, VM guests, external browsers and separately installed tools have other network identities. The desktop rules do not isolate their traffic or control access to local files.
+
+Use `-Mode Status` to check the rules, `-Mode CheckExit` to measure the proxy exit, `-Mode TestRelay` to exercise a temporary relay using ipify without starting the desktop app, or `-Mode Remove` to remove only the desktop policy after quitting it.
+
+### Native Chrome
+
 **Single verified IPv4 for protected native Chrome.** The default setting requires a guarantee about the source IPv4 used for every website. The current proxy integration can verify only the addresses seen by its probes. The protected launchers therefore show a warning and stop before a network probe, a browser launch or elevation. Rechecking the node or disabling IPv6 locally cannot establish the upstream forwarding policy.
 
 To opt into periodic monitoring, explicitly set `web_require_verified_ipv4` to `false` in `config.json`. A missing setting or a value of `true` keeps the strict policy. When upgrading, quit any guarded Chrome session and its old monitor first.
